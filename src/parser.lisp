@@ -45,6 +45,22 @@ This restriction is for protecting users' application
 against denial-of-service attacks where the attacker feeds
 us a never-ending header that the application keeps buffering.")
 
+(declaim (type fixnum +max-chunk-size-digits+))
+(defconstant +max-chunk-size-digits+ 16
+  "Maximum number of hex digits allowed in a chunk-size field.
+
+16 hex digits represent a 64-bit value (up to 2^64-1 bytes), far
+exceeding any practical chunk size. Limiting digit count prevents
+bignum allocation and bounds O(N^2) buffer reprocessing that occurs
+when the EOF handler replays buffered data across multiple calls.")
+
+(declaim (type fixnum +max-chunk-extension-bytes+))
+(defconstant +max-chunk-extension-bytes+ 1024
+  "Maximum number of bytes allowed in a chunk extension (after the
+semicolon through the CRLF). Prevents O(N^2) buffer reprocessing via
+the extension skip path, which has the same EOF-replay problem as
+the digit path.")
+
 
 ;;
 ;; Types
