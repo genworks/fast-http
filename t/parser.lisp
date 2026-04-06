@@ -416,6 +416,30 @@
     "hello"
     "chunk extension of exactly 1024 bytes is accepted")
 
+;; Space-separator path: exactly 1024 bytes of extension content accepted
+(is (getf (test-parser :request
+                       #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       (concatenate 'string
+                                    "5 "
+                                    (make-string 1024 :initial-element #\x)
+                                    #?"\r\nhello\r\n0\r\n\r\n"))
+           :body)
+    "hello"
+    "chunk extension via space separator of exactly 1024 bytes is accepted")
+
+;; Space-separator path: 1025 bytes of extension content rejected
+(is-error (test-simple #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       (concatenate 'string
+                                    "5 "
+                                    (make-string 1025 :initial-element #\x)
+                                    #?"\r\nhello\r\n0\r\n\r\n"))
+          'invalid-chunk-size
+          "chunk extension via space separator exceeding 1024 bytes is rejected")
+
 ;; 17 hex digits with non-zero leading digit — must be rejected
 (is-error (test-simple #?"POST / HTTP/1.1\r\n"
                        #?"Transfer-Encoding: chunked\r\n"
