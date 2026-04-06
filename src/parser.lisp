@@ -57,9 +57,9 @@ when the EOF handler replays buffered data across multiple calls.")
 (declaim (type fixnum +max-chunk-extension-bytes+))
 (defconstant +max-chunk-extension-bytes+ 1024
   "Maximum number of bytes allowed in a chunk extension (after the
-semicolon through the CRLF). Prevents O(N^2) buffer reprocessing via
-the extension skip path, which has the same EOF-replay problem as
-the digit path.")
+semicolon through the CRLF). Bounds O(N^2) buffer reprocessing to a
+constant maximum: with a 1024-byte cap, replay cost is at most ~524K
+operations per extension line rather than unbounded.")
 
 
 ;;
@@ -597,10 +597,14 @@ the digit path.")
                           (cond
                             ((or (= (current) (char-code #\;))
                                  (= (current) (char-code #\Space)))
-                             ;; Bounded extension skip: prevents O(N^2) reprocessing
-                             ;; from the EOF-replay path (skip* has no built-in limit).
+                             ;; Bounded extension skip: caps O(N^2) buffer replay cost
+                             ;; to a constant maximum (skip* has no built-in limit).
                              ;; Advance past the separator (`;` or space) so it is not
                              ;; charged against the +max-chunk-extension-bytes+ limit.
+                             ;; NOTE: (go :eof) here targets the outer with-octets-parsing
+                             ;; :eof tag. Do not add a nested (tagbody ... :eof ...) inside
+                             ;; this loop — it would shadow the outer tag and silently break
+                             ;; EOF handling.
                              (or (advance*) (go :eof))
                              (let ((ext-count 0))
                                (declare (type fixnum ext-count))
