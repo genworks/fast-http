@@ -45,7 +45,9 @@
            :header-value-parsing-error
            :invalid-header-value
            :invalid-parameter-key
-           :invalid-parameter-value))
+           :invalid-parameter-value
+
+           :parser-poisoned))
 (in-package :fast-http.error)
 
 (define-condition fast-http-error (simple-error)
@@ -159,6 +161,8 @@
   ((description :initform "parser is paused")))
 (define-condition unknown-error (parsing-error)
   ((description :initform "an unknown error occured")))
+(define-condition parser-poisoned (parsing-error)
+  ((description :initform "parser is in an error state due to a previous parsing failure and cannot be reused")))
 
 
 ;;
@@ -175,7 +179,7 @@
 ;;
 ;; Header value parsing
 
-(define-condition header-value-parsing-error (multipart-parsing-error) ())
+(define-condition header-value-parsing-error (parsing-error) ())
 
 (define-condition invalid-header-value (header-value-parsing-error)
   ((description :initform "invalid header value")))

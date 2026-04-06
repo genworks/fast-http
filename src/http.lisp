@@ -24,6 +24,8 @@
            :http-resource
            :http-status-text
 
+           :http-error-p
+
            :http-header-read
            :http-mark
            :http-state
@@ -69,7 +71,8 @@
   ;; private
   (header-read 0 :type fixnum)
   (mark -1 :type fixnum)
-  (state +state-first-line+ :type fixnum))
+  (state +state-first-line+ :type fixnum)
+  (error-p nil :type boolean))
 
 (defun http-version (http)
   (float

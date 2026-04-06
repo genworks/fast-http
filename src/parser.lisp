@@ -45,6 +45,31 @@ This restriction is for protecting users' application
 against denial-of-service attacks where the attacker feeds
 us a never-ending header that the application keeps buffering.")
 
+(declaim (type fixnum +max-chunk-size-digits+))
+(defconstant +max-chunk-size-digits+ 16
+  "Maximum number of hex digits allowed in a chunk-size field.
+
+16 hex digits represent a 64-bit value (up to 2^64-1 bytes), far
+exceeding any practical chunk size. Limiting digit count prevents
+bignum allocation and bounds O(N^2) buffer reprocessing that occurs
+when the EOF handler replays buffered data across multiple calls.")
+
+(declaim (type fixnum +max-content-length-digits+))
+(defconstant +max-content-length-digits+ 20
+  "Maximum number of decimal digits allowed in a Content-Length header value.
+
+20 decimal digits represent values up to 99,999,999,999,999,999,999, which
+exceeds 2^64-1 (18,446,744,073,709,551,615, 20 digits). Limiting digit count
+prevents unbounded bignum allocation from a crafted header like
+'Content-Length: 111...111' with millions of digits.")
+
+(declaim (type fixnum +max-chunk-extension-bytes+))
+(defconstant +max-chunk-extension-bytes+ 1024
+  "Maximum number of bytes allowed in a chunk extension (after the
+semicolon through the CRLF). Bounds O(N^2) buffer reprocessing to a
+constant maximum: with a 1024-byte cap, replay cost is at most ~524K
+operations per extension line rather than unbounded.")
+
 
 ;;
 ;; Types
@@ -138,7 +163,9 @@ us a never-ending header that the application keeps buffering.")
     :test 'equalp)
 
 (defun-insane unhex-byte (byte)
-  (aref +unhex+ byte))
+  (if (< byte 128)
+      (aref +unhex+ byte)
+      -1))
 
 ;;
 ;; Main
@@ -382,27 +409,40 @@ us a never-ending header that the application keeps buffering.")
 (defun-speedy parse-header-value-content-length (data start end)
   (declare (type simple-byte-vector data)
            (type pointer start end))
-  (let ((content-length 0))
-    (declare (type integer content-length))
+  (let ((content-length 0)
+        (digit-count 0)
+        (seen-space nil))
+    (declare (type integer content-length)
+             (type fixnum digit-count)
+             (type boolean seen-space))
     (with-octets-parsing (data :start start :end end)
       (if (digit-byte-char-p (current))
-          (setq content-length (digit-byte-char-to-integer (current)))
+          (progn
+            (setq content-length (digit-byte-char-to-integer (current)))
+            (setq digit-count 1))
           (error 'invalid-content-length))
       (loop
         (advance)
         (cond
           ((digit-byte-char-p (current))
+           (when seen-space
+             ;; Reject embedded spaces between digits (RFC 7230 §3.3.2)
+             (error 'invalid-content-length))
+           (when (> (incf digit-count) +max-content-length-digits+)
+             (error 'invalid-content-length))
            (setq content-length
                  (+ (* 10 content-length)
-                    (digit-byte-char-to-integer (current)))))
+                    (digit-byte-char-to-integer (current))))
+           (when (> content-length #xFFFFFFFFFFFFFFFF)
+             (error 'invalid-content-length)))
           ((= (current) +cr+)
            (advance)
            (skip #\Newline)
            (return-from parse-header-value-content-length
              (values start (- (pos) 2) (pos) content-length)))
           ((= (current) +space+)
-           ;; Discard spaces
-           )
+           ;; Allow trailing spaces, but flag for embedded-space detection
+           (setq seen-space t))
           (t (error 'invalid-content-length)))))
     (error 'eof)))
 
@@ -563,32 +603,55 @@ us a never-ending header that the application keeps buffering.")
                (error 'invalid-chunk-size))
              (setf (http-content-length http) unhex-val)
 
-             (loop
-               (advance)
-               (if (= (current) +cr+)
-                   (progn
-                     (advance)
-                     (tagbody
-                        (skip #\Newline)
-                      :eof
-                        (return)))
-                   (progn
-                     (setq unhex-val (unhex-byte (current)))
-                     (cond
-                       ((= unhex-val -1)
-                        (cond
-                          ((or (= (current) (char-code #\;))
-                               (= (current) (char-code #\Space)))
-                           (skip* (not #\Return))
-                           (advance)
-                           (tagbody
-                              (skip #\Newline)
-                            :eof
-                              (return)))
-                          (t (error 'invalid-chunk-size))))
-                       (t (setf (http-content-length http)
-                                (+ (* 16 (http-content-length http)) unhex-val)))))))
-             (setf (http-state http) +state-body+) 
+             ;; digit-count starts at 1 for the first digit already read above.
+             ;; On EOF re-entry, the saved buffer is re-parsed from scratch so
+             ;; this counter always reflects the total digits in the current attempt.
+             (let ((digit-count 1))
+               (declare (type fixnum digit-count))
+               (loop
+                 (advance)
+                 (if (= (current) +cr+)
+                     (progn
+                       (advance)
+                       (tagbody
+                          (skip #\Newline)
+                        :eof
+                          (return)))
+                     (progn
+                       (setq unhex-val (unhex-byte (current)))
+                       (cond
+                         ((= unhex-val -1)
+                          (cond
+                            ((or (= (current) (char-code #\;))
+                                 (= (current) (char-code #\Space)))
+                             ;; Bounded extension skip: caps O(N^2) buffer replay cost
+                             ;; to a constant maximum (skip* has no built-in limit).
+                             ;; Advance past the separator (`;` or space) so it is not
+                             ;; charged against the +max-chunk-extension-bytes+ limit.
+                             ;; NOTE: (go :eof) here targets the outer with-octets-parsing
+                             ;; :eof tag. Do not add a nested (tagbody ... :eof ...) inside
+                             ;; this loop — it would shadow the outer tag and silently break
+                             ;; EOF handling.
+                             (or (advance*) (go :eof))
+                             (let ((ext-count 0))
+                               (declare (type fixnum ext-count))
+                               (loop
+                                 (when (= (current) +cr+) (return))
+                                 (when (> (incf ext-count) +max-chunk-extension-bytes+)
+                                   (error 'invalid-chunk-size))
+                                 (or (advance*) (go :eof))))
+                             (advance)
+                             (tagbody
+                                (skip #\Newline)
+                              :eof
+                                (return)))
+                            (t (error 'invalid-chunk-size))))
+                         (t
+                          (when (> (incf digit-count) +max-chunk-size-digits+)
+                            (error 'invalid-chunk-size))
+                          (setf (http-content-length http)
+                                (+ (* 16 (http-content-length http)) unhex-val))))))))
+             (setf (http-state http) +state-body+)
              (if (eofp)
                  (return-from parse-chunked-body (pos))
                  (setf (http-mark http) (pos))))

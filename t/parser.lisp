@@ -361,6 +361,150 @@
       :complete t)
     "with bullshit after the length")
 
+(is-error (test-simple #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       #?"00000000000000001\r\n"
+                       #?"a\r\n"
+                       #?"0\r\n"
+                       #?"\r\n")
+          'invalid-chunk-size
+          "chunk-size with 17 hex digits is rejected")
+
+(is-error (test-simple #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       (concatenate 'string
+                                    "5;"
+                                    (make-string 1025 :initial-element #\x)
+                                    "\r\n"
+                                    "hello\r\n"
+                                    "0\r\n"
+                                    "\r\n"))
+          'invalid-chunk-size
+          "chunk extension exceeding 1024 bytes is rejected")
+
+;; Exactly 16 hex digits — must be accepted (0000000000000005 = 5)
+(is (test-parser :request
+                 #?"POST / HTTP/1.1\r\n"
+                 #?"Transfer-Encoding: chunked\r\n"
+                 #?"\r\n"
+                 #?"0000000000000005\r\n"
+                 #?"hello\r\n"
+                 #?"0\r\n"
+                 #?"\r\n")
+    '(:method :post
+      :status-code nil
+      :http-major 1
+      :http-minor 1
+      :url "/"
+      :headers ("Transfer-Encoding" "chunked")
+      :body "hello"
+      :complete t)
+    "chunk-size with exactly 16 hex digits is accepted")
+
+;; Exactly 1024-byte extension — must be accepted
+(is (getf (test-parser :request
+                       #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       (concatenate 'string
+                                    #?"5;"
+                                    (make-string 1024 :initial-element #\x)
+                                    #?"\r\nhello\r\n0\r\n\r\n"))
+           :body)
+    "hello"
+    "chunk extension of exactly 1024 bytes is accepted")
+
+;; Space-separator path: exactly 1024 bytes of extension content accepted
+(is (getf (test-parser :request
+                       #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       (concatenate 'string
+                                    "5 "
+                                    (make-string 1024 :initial-element #\x)
+                                    #?"\r\nhello\r\n0\r\n\r\n"))
+           :body)
+    "hello"
+    "chunk extension via space separator of exactly 1024 bytes is accepted")
+
+;; Space-separator path: 1025 bytes of extension content rejected
+(is-error (test-simple #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       (concatenate 'string
+                                    "5 "
+                                    (make-string 1025 :initial-element #\x)
+                                    #?"\r\nhello\r\n0\r\n\r\n"))
+          'invalid-chunk-size
+          "chunk extension via space separator exceeding 1024 bytes is rejected")
+
+;; 17 hex digits with non-zero leading digit — must be rejected
+(is-error (test-simple #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       #?"10000000000000000\r\n"
+                       #?"a\r\n"
+                       #?"0\r\n"
+                       #?"\r\n")
+          'invalid-chunk-size
+          "chunk-size with 17 hex digits (non-zero leading) is rejected")
+
+;; Content-Length: exactly 20 decimal digits — must be accepted
+;; 18446744073709551615 = 2^64-1 (20 digits, maximum valid value)
+(is (getf (test-parser :request
+                       #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 18446744073709551615\r\n"
+                       #?"\r\n")
+           :headers)
+    '("Content-Length" "18446744073709551615")
+    "Content-Length with exactly 20 decimal digits is accepted")
+
+;; Content-Length: 20 decimal digits exceeding 2^64-1 — must be rejected
+(is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 99999999999999999999\r\n"
+                       #?"\r\n")
+          'invalid-content-length
+          "Content-Length with 20 digits exceeding 2^64-1 is rejected")
+
+;; Content-Length: 21 decimal digits — must be rejected
+(is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 100000000000000000000\r\n"
+                       #?"\r\n")
+          'invalid-content-length
+          "Content-Length with 21 decimal digits is rejected")
+
+;; Content-Length: embedded space between digits — must be rejected (RFC 7230 §3.3.2)
+(is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 1 0\r\n"
+                       #?"\r\n")
+          'invalid-content-length
+          "Content-Length with embedded space between digits is rejected")
+
+;; Content-Length: trailing space after digits — must be accepted
+(is (getf (test-parser :request
+                       #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 10 \r\n"
+                       #?"\r\n")
+           :headers)
+    '("Content-Length" "10 ")
+    "Content-Length with trailing space is accepted")
+
+;; Chunk-size starting with a high byte (>= 128) — must be rejected, not cause
+;; out-of-bounds access in unhex-byte
+(let ((http (make-http))
+      (data (concatenate '(vector (unsigned-byte 8))
+                         (bv #?"POST / HTTP/1.1\r\n")
+                         (bv #?"Transfer-Encoding: chunked\r\n")
+                         (bv #?"\r\n")
+                         (make-array 1 :element-type '(unsigned-byte 8)
+                                       :initial-element 255)
+                         (bv #?"\r\n0\r\n\r\n"))))
+  (is-error (parse-request http (make-callbacks) data)
+            'invalid-chunk-size
+            "chunk-size starting with byte >= 128 is rejected"))
+
 (is (test-parser :request
                  #?"GET /with_\"stupid\"_quotes?foo=\"bar\" HTTP/1.1\r\n\r\n")
     '(:method :get
