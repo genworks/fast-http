@@ -655,4 +655,38 @@ you?\r
      t)
    "valid 16-digit chunk-size split across two calls is accepted"))
 
+(subtest "Parser poisoning after parsing-error"
+  ;; Use a clearly invalid HTTP method to trigger invalid-method (a parsing-error subtype)
+  (let ((bad-request (babel:string-to-octets (format nil "XYZZY / HTTP/1.1~C~C~C~C"
+                                                     #\Return #\Newline #\Return #\Newline)))
+        (good-request (babel:string-to-octets (format nil "GET / HTTP/1.1~C~C~C~C"
+                                                      #\Return #\Newline #\Return #\Newline))))
+    ;; Test 1: parsing-error is still signaled to the caller (not swallowed)
+    (is-error
+     (let* ((http (make-http-request))
+            (parser (make-parser http)))
+       (funcall parser bad-request))
+     'fast-http.error:parsing-error
+     "parsing-error propagates to the caller")
+
+    ;; Test 2: after a parsing-error, reusing the parser signals parser-poisoned
+    (is-error
+     (let* ((http (make-http-request))
+            (parser (make-parser http)))
+       ;; First call: trigger an error with invalid method
+       (ignore-errors
+         (funcall parser bad-request))
+       ;; Second call: parser should be poisoned
+       (funcall parser good-request))
+     'fast-http.error:parser-poisoned
+     "reusing parser after error signals parser-poisoned")
+
+    ;; Test 3: http-error-p is set after a parsing error
+    (let* ((http (make-http-request))
+           (parser (make-parser http)))
+      (is (http-error-p http) nil "http-error-p is nil before any error")
+      (ignore-errors
+        (funcall parser bad-request))
+      (ok (http-error-p http) "http-error-p is t after parsing error"))))
+
 (finalize)

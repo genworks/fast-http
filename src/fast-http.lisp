@@ -89,6 +89,9 @@
            :strict-error
            :paused-error
            :unknown-error
+           :parser-poisoned
+
+           :http-error-p
 
            :multipart-parsing-error
            :invalid-multipart-body
@@ -198,6 +201,8 @@
 
     (lambda (data &key (start 0) end)
       (declare (optimize (speed 3) (safety 2)))
+      (when (http-error-p http)
+        (error 'parser-poisoned))
       (cond
         ((eql data :eof)
          (setq completedp t)
@@ -220,7 +225,10 @@
                (funcall parse-fn http callbacks (the simple-byte-vector data) :start start :end end :head-request head-request)
              (eof ()
                (setq data-buffer
-                     (subseq data (http-mark http) (or end (length data)))))))))
+                     (subseq data (http-mark http) (or end (length data)))))
+             (parsing-error (e)
+               (setf (http-error-p http) t)
+               (error e))))))
       (values http header-complete-p completedp))))
 
 (defun find-boundary (content-type)
