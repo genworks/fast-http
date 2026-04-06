@@ -176,7 +176,7 @@
 ;;
 ;; Header value parsing
 
-(define-condition header-value-parsing-error (multipart-parsing-error) ())
+(define-condition header-value-parsing-error (parsing-error) ())
 
 (define-condition invalid-header-value (header-value-parsing-error)
   ((description :initform "invalid header value")))
