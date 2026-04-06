@@ -19,6 +19,7 @@
            :http-content-length
            :http-chunked-p
            :http-upgrade-p
+           :http-transfer-encoding-seen-p
 
            :http-headers
            :http-resource
@@ -63,6 +64,7 @@
   (content-length nil :type (or null integer))
   (chunked-p nil :type boolean)
   (upgrade-p nil :type boolean)
+  (transfer-encoding-seen-p nil :type boolean)
 
   headers
 

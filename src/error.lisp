@@ -31,6 +31,7 @@
            :invalid-header-token
            :invalid-content-length
            :invalid-chunk-size
+           :duplicate-transfer-encoding
            :invalid-constant
            :invalid-internal-state
            :strict-error
@@ -131,6 +132,8 @@
   ((description :initform "invalid character in content-length header")))
 (define-condition invalid-chunk-size (parsing-error)
   ((description :initform "invalid character in chunk size header")))
+(define-condition duplicate-transfer-encoding (parsing-error)
+  ((description :initform "duplicate Transfer-Encoding header")))
 (define-condition invalid-constant (parsing-error)
   ((description :initform "invalid constant string")))
 

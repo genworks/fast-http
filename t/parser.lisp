@@ -1290,4 +1290,78 @@
       :complete t)
     "empty reason phrase after space")
 
+(subtest "Transfer-Encoding trailing OWS"
+  (let ((http (test-simple #?"GET / HTTP/1.1\r\n"
+                            #?"Transfer-Encoding: chunked \r\n"
+                            #?"\r\n")))
+    (ok (http-chunked-p http)
+        "trailing space after chunked"))
+  (let ((http (test-simple #?"GET / HTTP/1.1\r\n"
+                            #?"Transfer-Encoding: chunked\t\r\n"
+                            #?"\r\n")))
+    (ok (http-chunked-p http)
+        "trailing tab after chunked"))
+  (let ((http (test-simple #?"GET / HTTP/1.1\r\n"
+                            #?"Transfer-Encoding: chunked \t \r\n"
+                            #?"\r\n")))
+    (ok (http-chunked-p http)
+        "trailing mixed OWS after chunked")))
+
+(subtest "Duplicate Transfer-Encoding rejection"
+  (is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                          #?"Transfer-Encoding: chunked\r\n"
+                          #?"Transfer-Encoding: chunked\r\n"
+                          #?"\r\n")
+            'duplicate-transfer-encoding
+            "duplicate chunked TE headers")
+  (is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                          #?"Transfer-Encoding: identity\r\n"
+                          #?"Transfer-Encoding: chunked\r\n"
+                          #?"\r\n")
+            'duplicate-transfer-encoding
+            "conflicting TE headers")
+  (is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                          #?"Transfer-Encoding: \r\n"
+                          #?"Transfer-Encoding: chunked\r\n"
+                          #?"\r\n")
+            'duplicate-transfer-encoding
+            "empty TE value followed by chunked TE"))
+
+(subtest "Transfer-Encoding reset between messages"
+  (let ((http (make-http)))
+    (parse-request http (make-callbacks)
+                   (bv (concatenate 'string
+                         #?"GET /first HTTP/1.1\r\n"
+                         #?"Transfer-Encoding: chunked\r\n"
+                         #?"\r\n"
+                         #?"0\r\n"
+                         #?"\r\n")))
+    (ok (http-chunked-p http)
+        "first request is chunked")
+    (parse-request http (make-callbacks)
+                   (bv (concatenate 'string
+                         #?"GET /second HTTP/1.1\r\n"
+                         #?"Transfer-Encoding: chunked\r\n"
+                         #?"\r\n"
+                         #?"0\r\n"
+                         #?"\r\n")))
+    (ok (http-chunked-p http)
+        "second request with TE does not falsely trigger duplicate error"))
+  (let ((http (make-http)))
+    (parse-request http (make-callbacks)
+                   (bv (concatenate 'string
+                         #?"GET /first HTTP/1.1\r\n"
+                         #?"Transfer-Encoding: chunked\r\n"
+                         #?"\r\n"
+                         #?"0\r\n"
+                         #?"\r\n")))
+    (ok (http-chunked-p http)
+        "first request is chunked")
+    (parse-request http (make-callbacks)
+                   (bv (concatenate 'string
+                         #?"GET /second HTTP/1.1\r\n"
+                         #?"\r\n")))
+    (ok (not (http-chunked-p http))
+        "second request without TE has chunked-p nil")))
+
 (finalize)

@@ -84,6 +84,7 @@
            :invalid-header-token
            :invalid-content-length
            :invalid-chunk-size
+           :duplicate-transfer-encoding
            :invalid-constant
            :invalid-internal-state
            :strict-error
