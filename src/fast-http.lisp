@@ -86,6 +86,7 @@
            :duplicate-content-length
            :invalid-chunk-size
            :duplicate-transfer-encoding
+           :conflicting-content-length-and-transfer-encoding
            :invalid-constant
            :invalid-internal-state
            :strict-error
