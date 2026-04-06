@@ -163,7 +163,9 @@ operations per extension line rather than unbounded.")
     :test 'equalp)
 
 (defun-insane unhex-byte (byte)
-  (aref +unhex+ byte))
+  (if (< byte 128)
+      (aref +unhex+ byte)
+      -1))
 
 ;;
 ;; Main

@@ -468,6 +468,20 @@
           'invalid-content-length
           "Content-Length with 21 decimal digits is rejected")
 
+;; Chunk-size starting with a high byte (>= 128) — must be rejected, not cause
+;; out-of-bounds access in unhex-byte
+(is-error (test-simple #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       (concatenate '(vector (unsigned-byte 8))
+                                    (make-array 1 :element-type '(unsigned-byte 8)
+                                                  :initial-element 255)
+                                    #?"\r\n"
+                                    #?"0\r\n"
+                                    #?"\r\n"))
+          'invalid-chunk-size
+          "chunk-size starting with byte >= 128 is rejected")
+
 (is (test-parser :request
                  #?"GET /with_\"stupid\"_quotes?foo=\"bar\" HTTP/1.1\r\n\r\n")
     '(:method :get
