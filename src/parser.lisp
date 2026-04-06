@@ -394,51 +394,45 @@ operations per extension line rather than unbounded.")
         (pos))
       (error 'eof)))
 
-(defun chunked-token-p (data start end)
-  "Return T if any comma-separated token in DATA[START..END) is \"chunked\" (case-insensitive)."
-  (declare (type simple-byte-vector data)
-           (type pointer start end))
-  (let ((i start))
-    (loop
-      ;; skip leading whitespace and commas
-      (loop while (and (< i end)
-                       (let ((b (aref data i)))
-                         (or (= b +space+) (= b +tab+) (= b (char-code #\,)))))
-            do (incf i))
-      (when (>= i end)
-        (return nil))
-      ;; collect token end
-      (let ((token-start i))
-        (loop while (and (< i end)
-                         (let ((b (aref data i)))
-                           (not (or (= b +space+) (= b +tab+) (= b (char-code #\,))))))
-              do (incf i))
-        (let* ((token-end i)
-               (token-len (- token-end token-start))
-               (chunked-bytes #.(map '(vector (unsigned-byte 8)) #'char-code "chunked")))
-          (when (= token-len (length chunked-bytes))
-            (let ((match t))
-              (loop for j from 0 below token-len
-                    do (let ((b (aref data (+ token-start j)))
-                             (c (aref chunked-bytes j)))
-                         ;; case-insensitive compare: uppercase by clearing bit 5
-                         (unless (= (logior b #x20) c)
-                           (setq match nil)
-                           (return))))
-              (when match
-                (return t)))))))))
-
 (defun-speedy parse-header-value-transfer-encoding (data start end)
   (declare (type simple-byte-vector data)
            (type pointer start end))
   (with-octets-parsing (data :start start :end end)
-    (skip* (not #\Return))
-    (let ((value-end (pos)))
-      (advance)
-      (skip #\Newline)
-      (return-from parse-header-value-transfer-encoding
-        (values start value-end (pos)
-                (chunked-token-p data start value-end)))))
+    (let ((chunkedp nil))
+      (loop
+        ;; Skip OWS between tokens
+        (skip* #\Space #\Tab)
+        ;; End of value
+        (when (= (current) +cr+)
+          (advance)
+          (skip #\Newline)
+          (return-from parse-header-value-transfer-encoding
+            (values start (- (pos) 2) (pos) chunkedp)))
+        ;; Try to match "chunked" token
+        (match-i-case
+         ("chunked"
+          ;; Valid token boundary: OWS, comma, or CR follows
+          (when (or (= (current) +cr+)
+                    (= (current) +space+)
+                    (= (current) +tab+)
+                    (= (current) #.(char-code #\,)))
+            (setf chunkedp t))
+          ;; Skip any remaining bytes in this token
+          (loop until (or (= (current) +cr+)
+                          (= (current) #.(char-code #\,)))
+                do (advance)))
+         (otherwise
+          (loop until (or (= (current) +cr+)
+                          (= (current) #.(char-code #\,)))
+                do (advance))))
+        ;; Now at comma or CR
+        (when (= (current) +cr+)
+          (advance)
+          (skip #\Newline)
+          (return-from parse-header-value-transfer-encoding
+            (values start (- (pos) 2) (pos) chunkedp)))
+        ;; Skip comma, continue to next token
+        (advance))))
   (error 'eof))
 
 (defun-speedy parse-header-value-content-length (data start end)
