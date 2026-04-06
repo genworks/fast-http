@@ -599,6 +599,9 @@ the digit path.")
                                  (= (current) (char-code #\Space)))
                              ;; Bounded extension skip: prevents O(N^2) reprocessing
                              ;; from the EOF-replay path (skip* has no built-in limit).
+                             ;; Advance past the separator (`;` or space) so it is not
+                             ;; charged against the +max-chunk-extension-bytes+ limit.
+                             (or (advance*) (go :eof))
                              (let ((ext-count 0))
                                (declare (type fixnum ext-count))
                                (loop
