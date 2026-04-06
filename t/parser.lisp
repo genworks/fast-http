@@ -1485,6 +1485,20 @@
             'duplicate-transfer-encoding
             "empty TE value followed by chunked TE"))
 
+(subtest "Conflicting Content-Length and Transfer-Encoding rejection"
+  (is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                          #?"Content-Length: 10\r\n"
+                          #?"Transfer-Encoding: chunked\r\n"
+                          #?"\r\n")
+            'conflicting-content-length-and-transfer-encoding
+            "Content-Length before Transfer-Encoding")
+  (is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                          #?"Transfer-Encoding: chunked\r\n"
+                          #?"Content-Length: 10\r\n"
+                          #?"\r\n")
+            'conflicting-content-length-and-transfer-encoding
+            "Transfer-Encoding before Content-Length"))
+
 (subtest "Transfer-Encoding reset between messages"
   (let ((http (make-http)))
     (parse-request http (make-callbacks)
