@@ -597,7 +597,15 @@ the digit path.")
                           (cond
                             ((or (= (current) (char-code #\;))
                                  (= (current) (char-code #\Space)))
-                             (skip* (not #\Return))
+                             ;; Bounded extension skip: prevents O(N^2) reprocessing
+                             ;; from the EOF-replay path (skip* has no built-in limit).
+                             (let ((ext-count 0))
+                               (declare (type fixnum ext-count))
+                               (loop
+                                 (when (= (current) +cr+) (return))
+                                 (when (> (incf ext-count) +max-chunk-extension-bytes+)
+                                   (error 'invalid-chunk-size))
+                                 (or (advance*) (go :eof))))
                              (advance)
                              (tagbody
                                 (skip #\Newline)
