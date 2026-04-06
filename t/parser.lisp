@@ -461,6 +461,13 @@
     '("Content-Length" "18446744073709551615")
     "Content-Length with exactly 20 decimal digits is accepted")
 
+;; Content-Length: 20 decimal digits exceeding 2^64-1 — must be rejected
+(is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 99999999999999999999\r\n"
+                       #?"\r\n")
+          'invalid-content-length
+          "Content-Length with 20 digits exceeding 2^64-1 is rejected")
+
 ;; Content-Length: 21 decimal digits — must be rejected
 (is-error (test-simple #?"GET / HTTP/1.1\r\n"
                        #?"Content-Length: 100000000000000000000\r\n"
