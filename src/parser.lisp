@@ -338,6 +338,12 @@ operations per extension line rather than unbounded.")
              (multiple-value-bind (value-start value-end next content-length)
                  (parse-header-value-content-length data (pos) end)
                (declare (type pointer next))
+               ;; :header-field callback has already fired for "content-length"
+               ;; but :header-value will not fire if we error here — callers
+               ;; may see an orphaned field notification.
+               (when (and (not (typep http 'http-response))
+                          (http-chunked-p http))
+                 (error 'conflicting-content-length-and-transfer-encoding))
                (let ((existing (http-content-length http)))
                  (when (and existing (/= existing content-length))
                    (error 'duplicate-content-length))
@@ -354,6 +360,11 @@ operations per extension line rather than unbounded.")
              (multiple-value-bind (value-start value-end next chunkedp)
                  (parse-header-value-transfer-encoding data (pos) end)
                (declare (type pointer next))
+               ;; nil means header absent; 0 is a valid user-supplied Content-Length
+               (when (and (not (typep http 'http-response))
+                          chunkedp
+                          (http-content-length http))
+                 (error 'conflicting-content-length-and-transfer-encoding))
                (setf (http-chunked-p http) chunkedp)
                (advance-to* next)
                (callback-data :header-field http callbacks data field-start field-end)
@@ -387,27 +398,41 @@ operations per extension line rather than unbounded.")
   (declare (type simple-byte-vector data)
            (type pointer start end))
   (with-octets-parsing (data :start start :end end)
-    (match-i-case
-     ("chunked"
-      (skip* #\Space #\Tab)
-      (if (= (current) +cr+)
-          (progn
-            (advance)
-            (skip #\Newline)
-            (return-from parse-header-value-transfer-encoding
-              (values start (- (pos) 2) (pos) t)))
-          (progn
-            (skip+ (not #\Return))
-            (advance)
-            (skip #\Newline)
-            (return-from parse-header-value-transfer-encoding
-              (values start (- (pos) 2) (pos) nil)))))
-     (otherwise
-      (skip* (not #\Return))
-      (advance)
-      (skip #\Newline)
-      (return-from parse-header-value-transfer-encoding
-        (values start (- (pos) 2) (pos) nil)))))
+    (let ((chunkedp nil))
+      (loop
+        ;; Skip OWS between tokens
+        (skip* #\Space #\Tab)
+        ;; End of value
+        (when (= (current) +cr+)
+          (advance)
+          (skip #\Newline)
+          (return-from parse-header-value-transfer-encoding
+            (values start (- (pos) 2) (pos) chunkedp)))
+        ;; Try to match "chunked" token
+        (match-i-case
+         ("chunked"
+          ;; Valid token boundary: OWS, comma, or CR follows
+          (when (or (= (current) +cr+)
+                    (= (current) +space+)
+                    (= (current) +tab+)
+                    (= (current) #.(char-code #\,)))
+            (setf chunkedp t))
+          ;; Skip any remaining bytes in this token
+          (loop until (or (= (current) +cr+)
+                          (= (current) #.(char-code #\,)))
+                do (advance)))
+         (otherwise
+          (loop until (or (= (current) +cr+)
+                          (= (current) #.(char-code #\,)))
+                do (advance))))
+        ;; Now at comma or CR
+        (when (= (current) +cr+)
+          (advance)
+          (skip #\Newline)
+          (return-from parse-header-value-transfer-encoding
+            (values start (- (pos) 2) (pos) chunkedp)))
+        ;; Skip comma, continue to next token
+        (advance))))
   (error 'eof))
 
 (defun-speedy parse-header-value-content-length (data start end)
