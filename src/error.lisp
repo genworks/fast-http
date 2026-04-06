@@ -141,7 +141,7 @@
 (define-condition duplicate-transfer-encoding (parsing-error)
   ((description :initform "duplicate Transfer-Encoding header")))
 (define-condition conflicting-content-length-and-transfer-encoding (parsing-error)
-  ((description :initform "both Content-Length and Transfer-Encoding headers present")))
+  ((description :initform "Content-Length header present with chunked Transfer-Encoding")))
 (define-condition invalid-constant (parsing-error)
   ((description :initform "invalid constant string")))
 
