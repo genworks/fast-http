@@ -361,6 +361,16 @@
       :complete t)
     "with bullshit after the length")
 
+(is-error (test-simple #?"POST / HTTP/1.1\r\n"
+                       #?"Transfer-Encoding: chunked\r\n"
+                       #?"\r\n"
+                       #?"00000000000000001\r\n"
+                       #?"a\r\n"
+                       #?"0\r\n"
+                       #?"\r\n")
+          'invalid-chunk-size
+          "chunk-size with 17 hex digits is rejected")
+
 (is (test-parser :request
                  #?"GET /with_\"stupid\"_quotes?foo=\"bar\" HTTP/1.1\r\n\r\n")
     '(:method :get

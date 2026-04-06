@@ -576,32 +576,40 @@ the digit path.")
                (error 'invalid-chunk-size))
              (setf (http-content-length http) unhex-val)
 
-             (loop
-               (advance)
-               (if (= (current) +cr+)
-                   (progn
-                     (advance)
-                     (tagbody
-                        (skip #\Newline)
-                      :eof
-                        (return)))
-                   (progn
-                     (setq unhex-val (unhex-byte (current)))
-                     (cond
-                       ((= unhex-val -1)
-                        (cond
-                          ((or (= (current) (char-code #\;))
-                               (= (current) (char-code #\Space)))
-                           (skip* (not #\Return))
-                           (advance)
-                           (tagbody
-                              (skip #\Newline)
-                            :eof
-                              (return)))
-                          (t (error 'invalid-chunk-size))))
-                       (t (setf (http-content-length http)
-                                (+ (* 16 (http-content-length http)) unhex-val)))))))
-             (setf (http-state http) +state-body+) 
+             ;; digit-count starts at 1 for the first digit already read above.
+             ;; On EOF re-entry, the saved buffer is re-parsed from scratch so
+             ;; this counter always reflects the total digits in the current attempt.
+             (let ((digit-count 1))
+               (declare (type fixnum digit-count))
+               (loop
+                 (advance)
+                 (if (= (current) +cr+)
+                     (progn
+                       (advance)
+                       (tagbody
+                          (skip #\Newline)
+                        :eof
+                          (return)))
+                     (progn
+                       (setq unhex-val (unhex-byte (current)))
+                       (cond
+                         ((= unhex-val -1)
+                          (cond
+                            ((or (= (current) (char-code #\;))
+                                 (= (current) (char-code #\Space)))
+                             (skip* (not #\Return))
+                             (advance)
+                             (tagbody
+                                (skip #\Newline)
+                              :eof
+                                (return)))
+                            (t (error 'invalid-chunk-size))))
+                         (t
+                          (when (> (incf digit-count) +max-chunk-size-digits+)
+                            (error 'invalid-chunk-size))
+                          (setf (http-content-length http)
+                                (+ (* 16 (http-content-length http)) unhex-val))))))))
+             (setf (http-state http) +state-body+)
              (if (eofp)
                  (return-from parse-chunked-body (pos))
                  (setf (http-mark http) (pos))))
