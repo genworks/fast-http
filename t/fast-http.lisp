@@ -594,4 +594,65 @@ you?\r
             nil
             "multiple number headers")
 
+;;
+;; Streaming make-parser tests for chunk-size security limits
+;;
+;; These tests exercise the make-parser lambda (the public API) by feeding
+;; input in two separate calls, which exercises the EOF-buffering and replay
+;; path in make-parser.  The security constraints (max 16 hex digits in
+;; chunk-size, max 1024 bytes in chunk extension) must be enforced even when
+;; the input arrives in multiple increments.
+
+(defparameter *chunked-headers*
+  (babel:string-to-octets
+   #?"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n"))
+
+(subtest "streaming chunk-size security limits"
+
+  ;; Case 1: 17-digit chunk-size line split across two calls.
+  ;; First call: headers + 9 hex digits (no CRLF yet).
+  ;; Second call: 8 more hex digits + CRLF + terminal chunk.
+  ;; The parser buffers on EOF after 9 digits, then on re-entry sees 17 total
+  ;; digits, which exceeds +max-chunk-size-digits+ (16).
+  (is-error
+   (let* ((http (make-http-request))
+          (parser (make-parser http)))
+     (funcall parser (concatenate '(simple-array (unsigned-byte 8) (*))
+                                  *chunked-headers*
+                                  (babel:string-to-octets "123456789")))
+     (funcall parser (babel:string-to-octets #?"01234567\r\n1\r\nX\r\n0\r\n\r\n")))
+   'fast-http.error:invalid-chunk-size
+   "17-digit chunk-size split across two calls signals invalid-chunk-size")
+
+  ;; Case 2: 1025-byte chunk extension split across two calls.
+  ;; First call: headers + "1;" + 512 'a' bytes (no CRLF yet).
+  ;; Second call: 513 more 'a' bytes + CRLF + body chunk + terminal chunk.
+  ;; Total extension bytes = 1025, exceeding +max-chunk-extension-bytes+ (1024).
+  (is-error
+   (let* ((http (make-http-request))
+          (parser (make-parser http))
+          (ext-part1 (make-string 512 :initial-element #\a))
+          (ext-part2 (make-string 513 :initial-element #\a)))
+     (funcall parser (concatenate '(simple-array (unsigned-byte 8) (*))
+                                  *chunked-headers*
+                                  (babel:string-to-octets (concatenate 'string "1;" ext-part1))))
+     (funcall parser (babel:string-to-octets
+                      (concatenate 'string ext-part2 #?"\r\n1\r\nX\r\n0\r\n\r\n"))))
+   'fast-http.error:invalid-chunk-size
+   "1025-byte chunk extension split across two calls signals invalid-chunk-size")
+
+  ;; Case 3: Valid 16-digit chunk-size split across two calls.
+  ;; First call: headers + first 8 hex digits (no CRLF yet).
+  ;; Second call: 8 more hex digits + CRLF + body + terminal chunk.
+  ;; Exactly 16 digits is within the limit and must be accepted without error.
+  (ok
+   (let* ((http (make-http-request))
+          (parser (make-parser http)))
+     (funcall parser (concatenate '(simple-array (unsigned-byte 8) (*))
+                                  *chunked-headers*
+                                  (babel:string-to-octets "00000000")))
+     (funcall parser (babel:string-to-octets #?"00000001\r\nX\r\n0\r\n\r\n"))
+     t)
+   "valid 16-digit chunk-size split across two calls is accepted"))
+
 (finalize)
