@@ -407,9 +407,11 @@ operations per extension line rather than unbounded.")
   (declare (type simple-byte-vector data)
            (type pointer start end))
   (let ((content-length 0)
-        (digit-count 0))
+        (digit-count 0)
+        (seen-space nil))
     (declare (type integer content-length)
-             (type fixnum digit-count))
+             (type fixnum digit-count)
+             (type boolean seen-space))
     (with-octets-parsing (data :start start :end end)
       (if (digit-byte-char-p (current))
           (progn
@@ -420,6 +422,9 @@ operations per extension line rather than unbounded.")
         (advance)
         (cond
           ((digit-byte-char-p (current))
+           (when seen-space
+             ;; Reject embedded spaces between digits (RFC 7230 §3.3.2)
+             (error 'invalid-content-length))
            (when (> (incf digit-count) +max-content-length-digits+)
              (error 'invalid-content-length))
            (setq content-length
@@ -433,8 +438,8 @@ operations per extension line rather than unbounded.")
            (return-from parse-header-value-content-length
              (values start (- (pos) 2) (pos) content-length)))
           ((= (current) +space+)
-           ;; Discard spaces
-           )
+           ;; Allow trailing spaces, but flag for embedded-space detection
+           (setq seen-space t))
           (t (error 'invalid-content-length)))))
     (error 'eof)))
 

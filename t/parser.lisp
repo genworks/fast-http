@@ -475,6 +475,22 @@
           'invalid-content-length
           "Content-Length with 21 decimal digits is rejected")
 
+;; Content-Length: embedded space between digits — must be rejected (RFC 7230 §3.3.2)
+(is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 1 0\r\n"
+                       #?"\r\n")
+          'invalid-content-length
+          "Content-Length with embedded space between digits is rejected")
+
+;; Content-Length: trailing space after digits — must be accepted
+(is (getf (test-parser :request
+                       #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 10 \r\n"
+                       #?"\r\n")
+           :headers)
+    '("Content-Length" "10 ")
+    "Content-Length with trailing space is accepted")
+
 ;; Chunk-size starting with a high byte (>= 128) — must be rejected, not cause
 ;; out-of-bounds access in unhex-byte
 (is-error (test-simple #?"POST / HTTP/1.1\r\n"
