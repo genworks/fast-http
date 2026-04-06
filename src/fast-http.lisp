@@ -83,6 +83,7 @@
            :lf-expected
            :invalid-header-token
            :invalid-content-length
+           :duplicate-content-length
            :invalid-chunk-size
            :invalid-constant
            :invalid-internal-state

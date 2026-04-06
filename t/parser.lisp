@@ -1290,4 +1290,18 @@
       :complete t)
     "empty reason phrase after space")
 
+(is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 5\r\n"
+                       #?"Content-Length: 10\r\n"
+                       #?"\r\n")
+          'duplicate-content-length
+          "duplicate Content-Length with different values")
+
+(ok (test-simple #?"GET / HTTP/1.1\r\n"
+                 #?"Content-Length: 5\r\n"
+                 #?"Content-Length: 5\r\n"
+                 #?"\r\n"
+                 "hello")
+    "duplicate Content-Length with same value is allowed")
+
 (finalize)

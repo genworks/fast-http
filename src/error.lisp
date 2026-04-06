@@ -30,6 +30,7 @@
            :lf-expected
            :invalid-header-token
            :invalid-content-length
+           :duplicate-content-length
            :invalid-chunk-size
            :invalid-constant
            :invalid-internal-state
@@ -129,6 +130,8 @@
   ((description :initform "invalid character in header")))
 (define-condition invalid-content-length (parsing-error)
   ((description :initform "invalid character in content-length header")))
+(define-condition duplicate-content-length (parsing-error)
+  ((description :initform "duplicate Content-Length with conflicting values")))
 (define-condition invalid-chunk-size (parsing-error)
   ((description :initform "invalid character in chunk size header")))
 (define-condition invalid-constant (parsing-error)
