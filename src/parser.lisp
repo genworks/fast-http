@@ -347,6 +347,9 @@ operations per extension line rather than unbounded.")
                (callback-data :header-value http callbacks data value-start value-end)))))
           ("transfer-encoding"
            (expect-field-end
+            (when (http-transfer-encoding-seen-p http)
+              (error 'duplicate-transfer-encoding))
+            (setf (http-transfer-encoding-seen-p http) t)
             (skip-until-value-start-and
              (multiple-value-bind (value-start value-end next chunkedp)
                  (parse-header-value-transfer-encoding data (pos) end)
@@ -386,6 +389,7 @@ operations per extension line rather than unbounded.")
   (with-octets-parsing (data :start start :end end)
     (match-i-case
      ("chunked"
+      (skip* #\Space #\Tab)
       (if (= (current) +cr+)
           (progn
             (advance)
@@ -685,7 +689,8 @@ operations per extension line rather than unbounded.")
          trailing-headers
            (return-from parse-chunked-body
              (prog1 (parse-headers http callbacks data (pos) end)
-               (callback-notify :message-complete http callbacks)))))
+               (callback-notify :message-complete http callbacks)
+               (setf (http-state http) +state-first-line+)))))
       (error 'eof)))
 
 (defun-speedy parse-request (http callbacks data &key (start 0) end (head-request nil))
@@ -724,6 +729,10 @@ operations per extension line rather than unbounded.")
                   (return-from parse-request (pos)))))
 
            (setf (http-mark http) (pos))
+           (setf (http-transfer-encoding-seen-p http) nil)
+           (setf (http-chunked-p http) nil)
+           (setf (http-content-length http) nil)
+           (setf (http-upgrade-p http) nil)
            (callback-notify :message-begin http callbacks)
 
            (multiple-value-bind (method next)
@@ -821,6 +830,10 @@ operations per extension line rather than unbounded.")
 
          first-line
            (setf (http-mark http) (pos))
+           (setf (http-transfer-encoding-seen-p http) nil)
+           (setf (http-chunked-p http) nil)
+           (setf (http-content-length http) nil)
+           (setf (http-upgrade-p http) nil)
            (callback-notify :message-begin http callbacks)
 
            (multiple-value-bind (major minor next)
