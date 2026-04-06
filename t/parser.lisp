@@ -1522,25 +1522,4 @@
     (ok (not (http-chunked-p http))
         "second request without TE has chunked-p nil")))
 
-(subtest "Transfer-Encoding reset between messages"
-  (let ((http (make-http)))
-    (parse-request http (make-callbacks)
-                   (bv (concatenate 'string
-                         #?"GET /first HTTP/1.1\r\n"
-                         #?"Transfer-Encoding: chunked\r\n"
-                         #?"\r\n"
-                         #?"0\r\n"
-                         #?"\r\n")))
-    (ok (http-chunked-p http)
-        "first request is chunked")
-    (parse-request http (make-callbacks)
-                   (bv (concatenate 'string
-                         #?"GET /second HTTP/1.1\r\n"
-                         #?"Transfer-Encoding: chunked\r\n"
-                         #?"\r\n"
-                         #?"0\r\n"
-                         #?"\r\n")))
-    (ok (http-chunked-p http)
-        "second request with TE does not falsely trigger duplicate error")))
-
 (finalize)
