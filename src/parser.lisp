@@ -54,6 +54,15 @@ exceeding any practical chunk size. Limiting digit count prevents
 bignum allocation and bounds O(N^2) buffer reprocessing that occurs
 when the EOF handler replays buffered data across multiple calls.")
 
+(declaim (type fixnum +max-content-length-digits+))
+(defconstant +max-content-length-digits+ 20
+  "Maximum number of decimal digits allowed in a Content-Length header value.
+
+20 decimal digits represent values up to 99,999,999,999,999,999,999, which
+exceeds 2^64-1 (18,446,744,073,709,551,615, 20 digits). Limiting digit count
+prevents unbounded bignum allocation from a crafted header like
+'Content-Length: 111...111' with millions of digits.")
+
 (declaim (type fixnum +max-chunk-extension-bytes+))
 (defconstant +max-chunk-extension-bytes+ 1024
   "Maximum number of bytes allowed in a chunk extension (after the
@@ -395,16 +404,22 @@ operations per extension line rather than unbounded.")
 (defun-speedy parse-header-value-content-length (data start end)
   (declare (type simple-byte-vector data)
            (type pointer start end))
-  (let ((content-length 0))
-    (declare (type integer content-length))
+  (let ((content-length 0)
+        (digit-count 0))
+    (declare (type integer content-length)
+             (type fixnum digit-count))
     (with-octets-parsing (data :start start :end end)
       (if (digit-byte-char-p (current))
-          (setq content-length (digit-byte-char-to-integer (current)))
+          (progn
+            (setq content-length (digit-byte-char-to-integer (current)))
+            (setq digit-count 1))
           (error 'invalid-content-length))
       (loop
         (advance)
         (cond
           ((digit-byte-char-p (current))
+           (when (> (incf digit-count) +max-content-length-digits+)
+             (error 'invalid-content-length))
            (setq content-length
                  (+ (* 10 content-length)
                     (digit-byte-char-to-integer (current)))))

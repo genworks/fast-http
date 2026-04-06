@@ -451,6 +451,23 @@
           'invalid-chunk-size
           "chunk-size with 17 hex digits (non-zero leading) is rejected")
 
+;; Content-Length: exactly 20 decimal digits — must be accepted
+;; 18446744073709551615 = 2^64-1 (20 digits, maximum valid value)
+(is (getf (test-parser :request
+                       #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 18446744073709551615\r\n"
+                       #?"\r\n")
+           :headers)
+    '("Content-Length" "18446744073709551615")
+    "Content-Length with exactly 20 decimal digits is accepted")
+
+;; Content-Length: 21 decimal digits — must be rejected
+(is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                       #?"Content-Length: 100000000000000000000\r\n"
+                       #?"\r\n")
+          'invalid-content-length
+          "Content-Length with 21 decimal digits is rejected")
+
 (is (test-parser :request
                  #?"GET /with_\"stupid\"_quotes?foo=\"bar\" HTTP/1.1\r\n\r\n")
     '(:method :get
