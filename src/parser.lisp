@@ -338,7 +338,11 @@ operations per extension line rather than unbounded.")
              (multiple-value-bind (value-start value-end next content-length)
                  (parse-header-value-content-length data (pos) end)
                (declare (type pointer next))
-               (when (http-chunked-p http)
+               ;; :header-field callback has already fired for "content-length"
+               ;; but :header-value will not fire if we error here — callers
+               ;; may see an orphaned field notification.
+               (when (and (not (typep http 'http-response))
+                          (http-chunked-p http))
                  (error 'conflicting-content-length-and-transfer-encoding))
                (let ((existing (http-content-length http)))
                  (when (and existing (/= existing content-length))
@@ -356,7 +360,10 @@ operations per extension line rather than unbounded.")
              (multiple-value-bind (value-start value-end next chunkedp)
                  (parse-header-value-transfer-encoding data (pos) end)
                (declare (type pointer next))
-               (when (and chunkedp (http-content-length http))
+               ;; nil means header absent; 0 is a valid user-supplied Content-Length
+               (when (and (not (typep http 'http-response))
+                          chunkedp
+                          (http-content-length http))
                  (error 'conflicting-content-length-and-transfer-encoding))
                (setf (http-chunked-p http) chunkedp)
                (advance-to* next)
@@ -387,31 +394,51 @@ operations per extension line rather than unbounded.")
         (pos))
       (error 'eof)))
 
+(defun chunked-token-p (data start end)
+  "Return T if any comma-separated token in DATA[START..END) is \"chunked\" (case-insensitive)."
+  (declare (type simple-byte-vector data)
+           (type pointer start end))
+  (let ((i start))
+    (loop
+      ;; skip leading whitespace and commas
+      (loop while (and (< i end)
+                       (let ((b (aref data i)))
+                         (or (= b +space+) (= b +tab+) (= b (char-code #\,)))))
+            do (incf i))
+      (when (>= i end)
+        (return nil))
+      ;; collect token end
+      (let ((token-start i))
+        (loop while (and (< i end)
+                         (let ((b (aref data i)))
+                           (not (or (= b +space+) (= b +tab+) (= b (char-code #\,))))))
+              do (incf i))
+        (let* ((token-end i)
+               (token-len (- token-end token-start))
+               (chunked-bytes #.(map '(vector (unsigned-byte 8)) #'char-code "chunked")))
+          (when (= token-len (length chunked-bytes))
+            (let ((match t))
+              (loop for j from 0 below token-len
+                    do (let ((b (aref data (+ token-start j)))
+                             (c (aref chunked-bytes j)))
+                         ;; case-insensitive compare: uppercase by clearing bit 5
+                         (unless (= (logior b #x20) c)
+                           (setq match nil)
+                           (return))))
+              (when match
+                (return t)))))))))
+
 (defun-speedy parse-header-value-transfer-encoding (data start end)
   (declare (type simple-byte-vector data)
            (type pointer start end))
   (with-octets-parsing (data :start start :end end)
-    (match-i-case
-     ("chunked"
-      (skip* #\Space #\Tab)
-      (if (= (current) +cr+)
-          (progn
-            (advance)
-            (skip #\Newline)
-            (return-from parse-header-value-transfer-encoding
-              (values start (- (pos) 2) (pos) t)))
-          (progn
-            (skip+ (not #\Return))
-            (advance)
-            (skip #\Newline)
-            (return-from parse-header-value-transfer-encoding
-              (values start (- (pos) 2) (pos) nil)))))
-     (otherwise
-      (skip* (not #\Return))
+    (skip* (not #\Return))
+    (let ((value-end (pos)))
       (advance)
       (skip #\Newline)
       (return-from parse-header-value-transfer-encoding
-        (values start (- (pos) 2) (pos) nil)))))
+        (values start value-end (pos)
+                (chunked-token-p data start value-end)))))
   (error 'eof))
 
 (defun-speedy parse-header-value-content-length (data start end)

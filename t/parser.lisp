@@ -1497,7 +1497,31 @@
                           #?"Content-Length: 10\r\n"
                           #?"\r\n")
             'conflicting-content-length-and-transfer-encoding
-            "Transfer-Encoding before Content-Length"))
+            "Transfer-Encoding before Content-Length")
+  ;; comma-separated TE list containing chunked
+  (is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                          #?"Transfer-Encoding: gzip, chunked\r\n"
+                          #?"Content-Length: 10\r\n"
+                          #?"\r\n")
+            'conflicting-content-length-and-transfer-encoding
+            "TE list gzip,chunked with Content-Length")
+  (is-error (test-simple #?"GET / HTTP/1.1\r\n"
+                          #?"Transfer-Encoding: chunked, gzip\r\n"
+                          #?"Content-Length: 10\r\n"
+                          #?"\r\n")
+            'conflicting-content-length-and-transfer-encoding
+            "TE list chunked,gzip with Content-Length"))
+
+(subtest "Response allows both Transfer-Encoding and Content-Length"
+  (let ((http (make-http-response)))
+    (parse-response http (make-callbacks)
+                    (bv (concatenate 'string
+                          #?"HTTP/1.1 200 OK\r\n"
+                          #?"Transfer-Encoding: chunked\r\n"
+                          #?"Content-Length: 10\r\n"
+                          #?"\r\n")))
+    (ok (http-chunked-p http)
+        "response with TE:chunked and CL does not raise conflict error")))
 
 (subtest "Transfer-Encoding reset between messages"
   (let ((http (make-http)))
